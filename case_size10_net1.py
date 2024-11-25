@@ -134,13 +134,13 @@ def get_scores(VIM, gold_edges, gene_names, regulators):
 
 
 TS_data = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_timeseries.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_timeseries.tsv",
     sep='\t').values
 SS_data_1 = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_knockouts.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_knockouts.tsv",
     sep='\t').values
 SS_data_2 = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_knockdowns.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_knockdowns.tsv",
     sep='\t').values
 
 # SS_data_3 = pd.read_csv("/Users/macbookpro/Documents/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_multifactorial.tsv",sep='\t').values
@@ -165,7 +165,7 @@ gene_names = ['G'+str(i+1) for i in range(ngenes)]
 regulators = gene_names.copy()
 
 gold_edges = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_goldstandard.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_goldstandard.tsv",
     '\t', header=None)
 
 xgb_kwargs = dict(n_estimators=398, learning_rate=0.0137089260215423, importance_type="weight", max_depth=5, n_jobs=-1,objective ='reg:squarederror')
