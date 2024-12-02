@@ -18,7 +18,7 @@ BOUNDS_HIGH = [1000, 1.0, 15]  # upper bounds: n_estimators, learning_rate, max_
 NUM_OF_PARAMS = len(BOUNDS_HIGH)  # number of hyperparameters to optimize
 
 # GA constants
-POPULATION_SIZE = 20
+POPULATION_SIZE = 10.0
 P_CROSSOVER = 0.9  # probability for crossover
 P_MUTATION = 0.2  # probability for mutating an individual
 MAX_GENERATIONS = 5
@@ -62,6 +62,13 @@ def evaluate(individual):
         'n_jobs': -1
     }
 
+    # Print summaries of TS_data and SS_data (only a sample)
+    print("Steady-State Data (SS_data) Sample:")
+    print(SS_data[:5])  # print the first 5 rows of steady-state data
+
+    print("Time-Series Data (TS_data) Sample:")
+    print(TS_data[0][:5])  # print the first 5 rows of the first time-series data sample
+
     # `get_importances` and `get_scores` functions are already defined
     VIM = get_importances(TS_data, time_points, time_lag=0, gene_names=gene_names, regulators=regulators,
                           alpha=0.022408670532763, SS_data=SS_data, param=param)
@@ -70,7 +77,10 @@ def evaluate(individual):
     auroc, aupr = get_scores(VIM, gold_edges, gene_names, regulators)
 
     # We return a tuple, as DEAP expects it
-    return auroc,  # Maximizing AUROC
+    # We return a tuple, as DEAP expects it
+    print(f"AUROC: {auroc}")
+    print(f"AUPR: {aupr}")
+    return auroc, aupr  # Maximizing AUROC
 
 
 # Register the evaluation function
