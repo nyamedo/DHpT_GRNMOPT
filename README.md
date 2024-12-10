@@ -51,12 +51,6 @@ This process is repeated for several generations, with the goal of evolving the 
 4. Visualize the Network: The predicted gene regulatory network will be visualized using NetworkX and Matplotlib.
 5. For more detailed test, please refer to the /DHpT_GRNMOPT.
 
-## Project Structure
-**get_importances.py** :  Functions to calculate feature importances from the time-series data using XGBoost.
-**genetic_algorithm.py**: Implements the genetic algorithm for hyperparameter optimization.
-**visualization.py** : Functions to visualize the predicted gene regulatory network using NetworkX and Matplotlib.
-**DREAM4/*(Specific data file)/** : Directory containing the input data files (e.g., time-series data, steady-state data, gold standard).
-**examples/** : Directory with example scripts for running the project.
 
 
 ## Example Workflow
