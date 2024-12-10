@@ -1,235 +1,3 @@
-# import networkx as nx
-# from matplotlib import pyplot as plt
-# from xgboost import XGBRegressor
-# import numpy as np
-# import pandas as pd
-# import time
-# from sklearn.metrics import roc_auc_score, average_precision_score
-# from deap import base, creator, tools, algorithms
-# import random
-#
-# from case_size10_net1 import get_importances, get_scores, TS_data, time_points, gene_names, regulators, SS_data, \
-#     gold_edges
-#
-#
-#
-# # (Assumed the previous helper functions `get_importances`, `get_scores`, and `get_links` are already defined)
-#
-# # Helper functions for feature importance and scoring (to be added below)
-# def get_importances(TS_data, time_points, time_lag, gene_names, regulators, alpha, SS_data=None, param={}):
-#     time_start = time.time()
-#     ngenes = TS_data[0].shape[1]
-#     alphas = [alpha] * ngenes
-#
-#     idx = [i for i, gene in enumerate(gene_names) if gene in regulators]
-#     VIM = np.zeros((ngenes, ngenes))
-#
-#     for i in range(ngenes):
-#         input_idx = idx.copy()
-#         if i in input_idx:
-#             input_idx.remove(i)
-#         vi = get_importances_single(TS_data, time_points, time_lag, alphas[i], input_idx, i, SS_data, param)
-#         VIM[i, :] = vi
-#
-#     time_end = time.time()
-#     print("Elapsed time: %.2f seconds" % (time_end - time_start))
-#
-#     return VIM
-#
-#
-# def get_importances_single(TS_data, time_points, time_lag, alpha, input_idx, output_idx, SS_data, param):
-#     h = 1
-#     ngenes = TS_data[0].shape[1]
-#     nsamples_time = sum([expr_data.shape[0] for expr_data in TS_data])
-#     ninputs = len(input_idx)
-#
-#     input_matrix_time = np.zeros((nsamples_time - h * len(TS_data), ninputs))
-#     output_vect_time = np.zeros(nsamples_time - h * len(TS_data))
-#     nsamples_count = 0
-#
-#     for i, current_timeseries in enumerate(TS_data):
-#         current_time_points = time_points[i]
-#         npoints = current_timeseries.shape[0]
-#         time_diff_current = current_time_points[h:] - current_time_points[:npoints - h]
-#         current_timeseries_input = current_timeseries[:npoints - h, input_idx]
-#         current_timeseries_output = (current_timeseries[h:, output_idx] - current_timeseries[:npoints - h,
-#                                                                           output_idx]) / time_diff_current + alpha * current_timeseries[
-#                                                                                                                      :npoints - h,
-#                                                                                                                      output_idx]
-#
-#         npoints = current_timeseries_input.shape[0]
-#         current_timeseries_input = current_timeseries_input[:npoints - time_lag]
-#         current_timeseries_output = current_timeseries_output[time_lag:]
-#
-#         nsamples_current = current_timeseries_input.shape[0]
-#         input_matrix_time[nsamples_count:nsamples_count + nsamples_current, :] = current_timeseries_input
-#         output_vect_time[nsamples_count:nsamples_count + nsamples_current] = current_timeseries_output
-#         nsamples_count += nsamples_current
-#
-#     if SS_data is not None:
-#         input_matrix_steady = SS_data[:, input_idx]
-#         output_vect_steady = SS_data[:, output_idx] * alpha
-#         input_all = np.vstack([input_matrix_steady, input_matrix_time])
-#         output_all = np.concatenate((output_vect_steady, output_vect_time))
-#     else:
-#         input_all = input_matrix_time
-#         output_all = output_vect_time
-#
-#     treeEstimator = XGBRegressor(**param)
-#     treeEstimator.fit(input_all, output_all)
-#
-#     feature_importances = treeEstimator.feature_importances_
-#     vi = np.zeros(ngenes)
-#     vi[input_idx] = feature_importances
-#
-#     return vi
-#
-#
-# def get_scores(VIM, gold_edges, gene_names, regulators):
-#     idx = [i for i, gene in enumerate(gene_names) if gene in regulators]
-#     pred_edges = [(gene_names[j], gene_names[i], score) for (i, j), score in np.ndenumerate(VIM) if i != j and j in idx]
-#     pred_edges = pd.DataFrame(pred_edges)
-#     final = pd.merge(pred_edges, gold_edges, on=[0, 1], how='inner')
-#     auroc = roc_auc_score(final['2_y'], final['2_x'])
-#     aupr = average_precision_score(final['2_y'], final['2_x'])
-#     return auroc, aupr
-#
-# def evaluate(individual, TS_data, time_points, time_lag, gene_names, regulators, SS_data, gold_edges):
-#     """
-#     Evaluate the fitness of an individual based on the AUC score and AP score.
-#     The individual represents a set of hyperparameters for XGBoost.
-#     """
-#     # Unpack individual hyperparameters
-#     n_estimators, learning_rate, max_depth = individual
-#
-#     # Define the XGBoost parameters
-#     xgb_kwargs = {
-#         'n_estimators': int(n_estimators),
-#         'learning_rate': learning_rate,
-#         'max_depth': int(max_depth),
-#         'importance_type': "weight",
-#         'n_jobs': -1,
-#         'objective': 'reg:squarederror'
-#     }
-#
-#     # Get the importance values using the current hyperparameters
-#     VIM = get_importances(TS_data, time_points, time_lag, gene_names, regulators, alpha=0.022408670532763,
-#                           SS_data=SS_data, param=xgb_kwargs)
-#
-#     # Calculate AUROC and AUPR scores
-#     auroc, aupr = get_scores(VIM, gold_edges, gene_names, regulators)
-#
-#     # Return a tuple as expected by DEAP (fitness values)
-#     return auroc, aupr
-#
-#
-# def mate(ind1, ind2):
-#     """
-#     Crossover operator to mix two individuals' hyperparameters.
-#     """
-#     cxpoint = random.randint(1, len(ind1) - 1)
-#     for i in range(cxpoint, len(ind1)):
-#         ind1[i], ind2[i] = ind2[i], ind1[i]
-#     return ind1, ind2
-#
-#
-# def mutate(individual):
-#     """
-#     Mutation operator to introduce random changes to an individual's hyperparameters.
-#     """
-#     for i in range(len(individual)):
-#         if random.random() < 0.2:  # 20% chance to mutate each hyperparameter
-#             if i == 0:  # n_estimators
-#                 individual[i] = random.randint(50, 500)  # New random value for n_estimators
-#             elif i == 1:  # learning_rate
-#                 individual[i] = random.uniform(0.001, 0.1)  # New random value for learning_rate
-#             elif i == 2:  # max_depth
-#                 individual[i] = random.randint(3, 15)  # New random value for max_depth
-#     return individual,
-#
-#
-# def create_individual():
-#     """Generate a random individual (hyperparameter set)."""
-#     n_estimators = random.randint(50, 500)
-#     learning_rate = random.uniform(0.001, 0.1)
-#     max_depth = random.randint(3, 15)
-#     return [n_estimators, learning_rate, max_depth]
-#
-#
-# # Setting up DEAP for genetic algorithm
-# creator.create("FitnessMax", base.Fitness, weights=(1.0, 1.0))  # Maximize both AUROC and AUPR
-# creator.create("Individual", list, fitness=creator.FitnessMax)
-#
-# toolbox = base.Toolbox()
-# toolbox.register("individual", tools.initIterate, creator.Individual, create_individual)
-# toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-# toolbox.register("mate", mate)
-# toolbox.register("mutate", mutate)
-# toolbox.register("evaluate", evaluate, TS_data=TS_data, time_points=time_points, time_lag=0, gene_names=gene_names,
-#                  regulators=regulators, SS_data=SS_data, gold_edges=gold_edges)
-# toolbox.register("select", tools.selTournament, tournsize=3)
-#
-# # Parameters for the genetic algorithm
-# population_size = 30
-# generations = 20
-# cx_probability = 0.7
-# mut_probability = 0.3
-#
-# # Create an initial population
-# population = toolbox.population(n=population_size)
-#
-# # Run the genetic algorithm
-# for gen in range(generations):
-#     print(f"Generation {gen}")
-#
-#     # Evaluate all individuals in the population
-#     fitnesses = list(map(toolbox.evaluate, population))
-#     for ind, fit in zip(population, fitnesses):
-#         ind.fitness.values = fit
-#
-#     # Select the best individuals for mating
-#     selected = toolbox.select(population, len(population))
-#     offspring = list(map(toolbox.clone, selected))
-#
-#     # Apply crossover and mutation
-#     for child1, child2 in zip(offspring[::2], offspring[1::2]):
-#         if random.random() < cx_probability:
-#             toolbox.mate(child1, child2)
-#             del child1.fitness.values
-#             del child2.fitness.values
-#
-#     for mutant in offspring:
-#         if random.random() < mut_probability:
-#             toolbox.mutate(mutant)
-#             del mutant.fitness.values
-#
-#     # Evaluate the fitness of the new offspring
-#     for ind in offspring:
-#         if not ind.fitness.valid:
-#             ind.fitness.values = toolbox.evaluate(ind)
-#
-#     # Replace the old population with the new one
-#     population[:] = offspring
-#
-# # After running GA, output the best individual
-# best_individual = tools.selBest(population, 1)[0]
-# print(f"Best individual: {best_individual}")
-# print(f"Fitness: {best_individual.fitness.values}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import random
 from deap import base, creator, tools
 from xgboost import XGBRegressor
@@ -360,13 +128,13 @@ def get_scores(VIM, gold_edges, gene_names, regulators):
 
 
 TS_data = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_timeseries.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_timeseries.tsv",
     sep='\t').values
 SS_data_1 = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_knockouts.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_knockouts.tsv",
     sep='\t').values
 SS_data_2 = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_knockdowns.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_knockdowns.tsv",
     sep='\t').values
 
 # SS_data_3 = pd.read_csv("/Users/macbookpro/Documents/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_multifactorial.tsv",sep='\t').values
@@ -391,10 +159,10 @@ gene_names = ['G' + str(i + 1) for i in range(ngenes)]
 regulators = gene_names.copy()
 
 gold_edges = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size100/insilico_size100_1_goldstandard.tsv",
+    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_goldstandard.tsv",
     '\t', header=None)
 
-xgb_kwargs = dict(n_estimators=398, learning_rate=0.0137089260215423, importance_type="weight", max_depth=5, n_jobs=-1,
+xgb_kwargs = dict(n_estimators=398, learning_rate=0.0137089260215423, importance_type="weight", max_depth=5, n_j123obs=-1,
                   objective='reg:squarederror')
 
 VIM = get_importances(TS_data, time_points, time_lag=0, gene_names=gene_names, regulators=regulators,
@@ -627,8 +395,9 @@ def plot_network(predicted_edges, gene_names):
     pos = nx.spring_layout(G, k=0.15, iterations=20)  # Use spring layout for node placement
 
     # Draw nodes and edges
-    nx.draw(G, pos, with_labels=True, node_size=3000, node_color='skyblue', font_size=10, font_weight='bold',
-            edge_color='gray', width=1, alpha=0.7)
+    # nx.draw(G, pos, with_labels=True, node_size=3000, node_color='skyblue', font_size=10, font_weight='bold',edge_color='gray', width=1, alpha=0.7)
+    nx.draw(G, pos, with_labels=True, node_size=1000, node_color='skyblue', font_size=10, font_weight='bold',
+            arrows=True)
 
     # Draw edge weights (importance values)
     edge_labels = nx.get_edge_attributes(G, 'weight')
