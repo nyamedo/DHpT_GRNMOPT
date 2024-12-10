@@ -49,7 +49,7 @@ This process is repeated for several generations, with the goal of evolving the 
 2. Run the Genetic Algorithm: The genetic algorithm will optimize the hyperparameters for the XGBoost model. It will tune parameters like n_estimators, learning_rate, and max_depth to maximize model performance.
 3. Predict the Gene Regulatory Network: After hyperparameter optimization, the best model will be used to calculate feature importances, which will be used to predict regulatory edges between genes.
 4. Visualize the Network: The predicted gene regulatory network will be visualized using NetworkX and Matplotlib.
-5. For more detailed test, please refer to the /DHpT_GRNMOPT.
+5. For more detailed test, please refer to the /DHpT.
 
 
 
