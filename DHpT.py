@@ -7,6 +7,7 @@ import time
 from sklearn.metrics import roc_auc_score, average_precision_score
 import networkx as nx
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 # from case_size10_net1 import get_importances, get_scores, TS_data, time_points, gene_names, regulators, SS_data, \
 #     gold_edges
@@ -426,64 +427,108 @@ def calculate_partial_correlations(data_matrix):
     return partial_corr_matrix
 
 #draw network showing attribution and inhibution
-def draw_network_with_attribution_inhibition(correlation_matrix, gene_names, threshold=0.25):
-    """
-    Draw a network graph based on the partial correlation matrix, showing attribution (+) and inhibition (-).
-
-    :param correlation_matrix: 2D numpy array of partial correlations
-    :param gene_names: List of gene names corresponding to the matrix
-    :param threshold: Minimum correlation value to include an edge
-    """
+def draw_network_with_attribution_inhibition(correlation_matrix, gene_names, threshold=0.3):
     # Create a directed graph
-    G = nx.DiGraph()  # Use directed graph for arrows
-    filtered_edges = predicted_edges[predicted_edges['Importance'] >= threshold]
-
-    # Add nodes to the graph (even for genes with no correlation)
+    G = nx.DiGraph()
+    
+    # Add nodes
     G.add_nodes_from(gene_names)
+    
+    # Add edges based on the correlation matrix
+    num_genes = len(gene_names)
+    for i in range(num_genes):
+        for j in range(num_genes):
+            if i != j:  # Avoid self-loops
+                corr = correlation_matrix[i, j]
+                if abs(corr) >= threshold:
+                    G.add_edge(gene_names[i], gene_names[j], weight=corr)
+    
+    # Set up the plot
+    plt.figure(figsize=(12, 12))
+    pos = nx.spring_layout(G, k=0.15, iterations=20)  # Use spring layout for node placement
 
-    # Add edges based on partial correlation threshold
-    for i in range(len(filtered_edges)):
-        gene1 = filtered_edges.iloc[i]['Gene1']
-        gene2 = filtered_edges.iloc[i]['Gene2']
-        importance = filtered_edges.iloc[i]['Importance']
+    # Draw nodes
+    nx.draw_networkx_nodes(G, pos, node_size=1000, node_color='skyblue')
+    nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold')
 
-        corr = correlation_matrix[gene_names.index(gene1), gene_names.index(gene2)]
-        sign = "-|-" if corr > 0 else "----|"  # Attribution (+) or Inhibition (-)
+    # Get the current axis
+    ax = plt.gca()
+    
+    # Define node size in normalized space
+    node_radius = 0.05  # Approximate node radius (adjust if necessary)
+    
+    # Define linewidth scaling
+    base_width = 1.5  # Minimum line width
+    scale_factor = 2.5  # How much correlation affects thickness
+    
+    # Draw edges manually with adjusted thickness and arrow styles
+    for u, v, d in G.edges(data=True):
+        x1, y1 = pos[u]
+        x2, y2 = pos[v]
+        weight = d['weight']
+        
+        # Compute direction vector
+        direction = np.array([x2 - x1, y2 - y1])
+        norm = np.linalg.norm(direction)
+        if norm == 0:
+            continue  # Skip self-loops or invalid edges
+        
+        unit_direction = direction / norm
+        
+        # Shorten the arrow so it doesn't start or end inside the node
+        start = np.array([x1, y1]) + unit_direction * node_radius
+        end = np.array([x2, y2]) - unit_direction * node_radius
+        
+        # Define arrow style and color
+        if weight > 0:
+            arrowstyle = "-|>"  # Normal arrowhead
+            color = "black"
+        else:
+            arrowstyle = "|-|"  # Tee arrowhead (matplotlib equivalent)
+            color = "red"
+            alpha = 0.0
+        
+        # Set line thickness proportional to absolute correlation value
+        linewidth = base_width + scale_factor * abs(weight)
+        
+        # Draw arrow using FancyArrowPatch
+        if weight < 0:
+        # First arrow: Visible |-| (T-bar)
+            arrow1 = mpatches.FancyArrowPatch(
+                start, end,
+                arrowstyle="|-|",
+                mutation_scale=15,
+                color=color,
+                lw=linewidth
+            )
+            
+            # Second arrow: Overlay with transparent one-sided bar (by making it very thin or invisible)
+            arrow2 = mpatches.FancyArrowPatch(
+                start, end,
+                arrowstyle="|-|",
+                mutation_scale=15,
+                color=color,
+                lw=0.1,  # Almost invisible
+                alpha=0.0  # Fully transparent
+            )
+            
+            ax.add_patch(arrow1)
+            ax.add_patch(arrow2)  # Adds an "invisible" second arrow to mimic the effect
+        else:
+            arrow = mpatches.FancyArrowPatch(
+                start, end,
+                arrowstyle=arrowstyle,
+                mutation_scale=15,
+                color=color,
+                lw=linewidth
+            )
 
-        # Add edge with weight and sign
-        if corr > 0:
-            G.add_edge(gene1, gene2, weight=abs(corr), sign=sign)  # Positive correlation -> gene1 -> gene2
-        elif corr < 0:
-            G.add_edge(gene2, gene1, weight=abs(corr), sign=sign)  # Negative correlation -> gene2 -> gene1
-
-    # Create edge color scheme based on attribution and inhibition
-    edge_colors = ['green' if G[u][v]['sign'] == "-|-" else 'red' for u, v in
-                   G.edges()]  # Green for attribution (+), red for inhibition (-)
-    edge_widths = [G[u][v]['weight'] * 2 for u, v in G.edges()]  # Scale edge widths based on correlation strength
-
-    # Plot the network with arrows
-    pos = nx.spring_layout(G)  # Positioning for nodes
-    nx.draw(
-        G,
-        pos,
-        with_labels=True,
-        node_color='lightblue',
-        edge_color=edge_colors,
-        width=edge_widths,
-        font_size=10,
-        arrows=True,  # Enable arrows on directed edges
-        node_size=2000,
-        font_weight='bold',
-    )
-
-    # Label edges with attribution (+) and inhibition (-)
-    edge_labels = {
-        (u, v): f"{G[u][v]['sign']}" for u, v in G.edges()
-    }
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8)
-
-    plt.title(f"Gene Network (Threshold: {threshold})")
+        ax.add_patch(arrow)
+    
+    # Show the plot
+    plt.title(f"Gene Regulatory Network (Threshold ≥ {threshold})")
     plt.show()
+
 
 
 # Convert TS_data into a single 2D array for correlation calculation
