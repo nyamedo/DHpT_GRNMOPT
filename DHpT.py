@@ -371,40 +371,152 @@ best_individual = hof[0]
 print(f"Best individual: {best_individual}")
 print(f"Fitness: {best_individual.fitness.values}")
 
-
-
-
-def plot_network(predicted_edges, gene_names):
+#Calculate partial correlation
+def calculate_partial_correlations(data_matrix):
     """
-    Visualizes the gene regulatory network (GRN) based on predicted edges.
-    :param predicted_edges: DataFrame with 'Gene1', 'Gene2', and 'Importance' columns
-    :param gene_names: List of gene names
+    Calculate the partial correlation matrix.
+
+    :param data_matrix: 2D numpy array where rows are samples and columns are variables
+    :return: Partial correlation matrix
     """
-    # Create a directed graph
+    # Calculate the inverse of the covariance matrix
+    covariance_matrix = np.cov(data_matrix, rowvar=False)
+    precision_matrix = np.linalg.inv(covariance_matrix)
+
+    # Compute the partial correlation matrix
+    d = np.sqrt(np.diag(precision_matrix))
+    partial_corr_matrix = -precision_matrix / np.outer(d, d)
+
+    # Set the diagonal elements to 1
+    np.fill_diagonal(partial_corr_matrix, 1)
+
+    return partial_corr_matrix
+
+
+import networkx as nx
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
+from scipy.spatial.distance import pdist, squareform
+
+def adjust_node_positions(pos, min_distance=0.2, max_iterations=100):
+    """
+    Adjusts node positions to avoid overlaps using a simple repulsion mechanism.
+    
+    :param pos: Dictionary of node positions
+    :param min_distance: Minimum allowable distance between nodes
+    :param max_iterations: Maximum number of adjustments
+    :return: Adjusted node positions
+    """
+    nodes = list(pos.keys())
+    positions = np.array([pos[n] for n in nodes])
+    
+    for _ in range(max_iterations):
+        distances = squareform(pdist(positions))  # Compute pairwise distances
+        np.fill_diagonal(distances, np.inf)  # Ignore self-distances
+        
+        overlap_indices = np.where(distances < min_distance)
+        if len(overlap_indices[0]) == 0:
+            break  # Exit early if no overlaps
+        
+        for i, j in zip(*overlap_indices):
+            if i < j:  # Avoid double adjustments
+                vec = positions[j] - positions[i]
+                norm = np.linalg.norm(vec)
+                if norm == 0:
+                    vec = np.random.rand(2) - 0.5  # Random small shift if nodes are exactly on top
+                    norm = np.linalg.norm(vec)
+                displacement = (min_distance - norm) * (vec / norm) * 0.5
+                positions[i] -= displacement
+                positions[j] += displacement
+
+    return {nodes[i]: tuple(positions[i]) for i in range(len(nodes))}
+
+def plot_network_with_autocorrelation(correlation_matrix, gene_names, threshold=0.3):
+    """
+    Visualizes the gene regulatory network (GRN) with non-overlapping nodes and edges.
+    """
     G = nx.DiGraph()
-
-    # Add nodes for each gene
+    
+    # Add nodes
     G.add_nodes_from(gene_names)
+    
+    # Add edges based on correlation matrix
+    num_genes = len(gene_names)
+    for i in range(num_genes):
+        for j in range(num_genes):
+            if i != j:  
+                corr = correlation_matrix[i, j]
+                if abs(corr) >= threshold:
+                    G.add_edge(gene_names[i], gene_names[j], weight=corr)
 
-    # Add edges with weights (Importance) from predicted edges
-    for _, row in predicted_edges.iterrows():
-        G.add_edge(row['Gene1'], row['Gene2'], weight=row['Importance'])
+    G.remove_nodes_from(list(nx.isolates(G)))  # Remove nodes with no edges
+    
+    if len(G.nodes) == 0:
+        print("No significant connections found above the threshold.")
+        return
+    
+    # Compute initial positions with high repulsion
+    pos = nx.spring_layout(G, k=0.4, iterations=50)  # Larger k increases spacing
+    pos = adjust_node_positions(pos, min_distance=0.2)  # Ensure no overlaps
 
-    # Set up the plot
+    # Draw nodes
     plt.figure(figsize=(12, 12))
-    pos = nx.spring_layout(G, k=0.15, iterations=20)  # Use spring layout for node placement
+    nx.draw_networkx_nodes(G, pos, node_size=1000, node_color='skyblue')
+    nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold')
 
-    # Draw nodes and edges
-    # nx.draw(G, pos, with_labels=True, node_size=3000, node_color='skyblue', font_size=10, font_weight='bold',edge_color='gray', width=1, alpha=0.7)
-    nx.draw(G, pos, with_labels=True, node_size=1000, node_color='skyblue', font_size=10, font_weight='bold',
-            arrows=True)
+    ax = plt.gca()
+    node_radius = 0.05  
+    base_width = 1.5  
+    scale_factor = 2.5  
 
-    # Draw edge weights (importance values)
-    edge_labels = nx.get_edge_attributes(G, 'weight')
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+    edge_offsets = {}  
 
-    # Show the plot
-    plt.title("Predicted Gene Regulatory Network (GRN)")
+    for u, v, d in G.edges(data=True):
+        x1, y1 = pos[u]
+        x2, y2 = pos[v]
+        weight = d['weight']
+        
+        direction = np.array([x2 - x1, y2 - y1])
+        norm = np.linalg.norm(direction)
+        if norm == 0:
+            continue 
+        
+        unit_direction = direction / norm
+        start = np.array([x1, y1]) + unit_direction * node_radius
+        end = np.array([x2, y2]) - unit_direction * node_radius
+
+        edge_key = tuple(sorted([u, v]))  
+        if edge_key in edge_offsets:
+            offset = edge_offsets[edge_key]
+        else:
+            offset = np.random.uniform(-0.03, 0.03)  
+            edge_offsets[edge_key] = offset
+
+        perp_direction = np.array([-unit_direction[1], unit_direction[0]]) * offset
+        start += perp_direction
+        end += perp_direction
+
+        linewidth = base_width + scale_factor * abs(weight)
+        
+        if weight > 0:
+            arrowstyle = "-|>"  
+            color = "black"
+        else:
+            arrowstyle = "-["  
+            color = "red"
+
+        arrow = mpatches.FancyArrowPatch(
+            start, end,
+            arrowstyle=arrowstyle,
+            mutation_scale=15,
+            color=color,
+            lw=linewidth,
+            connectionstyle="arc3,rad=0.2"  
+        )
+        ax.add_patch(arrow)
+
+    plt.title(f"Gene Regulatory Network (Threshold ≥ {threshold})")
     plt.show()
 
 
@@ -424,4 +536,4 @@ VIM_best = get_importances(TS_data, time_points, time_lag=0, gene_names=gene_nam
 predicted_edges_best = get_links(VIM_best, gene_names, regulators, sort=True, file_name=None)
 
 # Plot the network for the best individual
-plot_network(predicted_edges_best, gene_names)
+plot_network_with_autocorrelation(predicted_edges_best, gene_names)
