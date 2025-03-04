@@ -7,6 +7,9 @@ import time
 from sklearn.metrics import roc_auc_score, average_precision_score
 import networkx as nx
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from scipy.spatial.distance import pdist, squareform
+from matplotlib.patches import FancyArrowPatch
 
 # from case_size10_net1 import get_importances, get_scores, TS_data, time_points, gene_names, regulators, SS_data, \
 #     gold_edges
@@ -128,13 +131,13 @@ def get_scores(VIM, gold_edges, gene_names, regulators):
 
 
 TS_data = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_timeseries.tsv",
+    "DREAM4/insilico_size10/insilico_size10_1_timeseries.tsv",
     sep='\t').values
 SS_data_1 = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_knockouts.tsv",
+    "DREAM4/insilico_size10/insilico_size10_1_knockouts.tsv",
     sep='\t').values
 SS_data_2 = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_knockdowns.tsv",
+    "DREAM4/insilico_size10/insilico_size10_1_knockdowns.tsv",
     sep='\t').values
 
 # SS_data_3 = pd.read_csv("/Users/macbookpro/Documents/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_multifactorial.tsv",sep='\t').values
@@ -159,8 +162,8 @@ gene_names = ['G' + str(i + 1) for i in range(ngenes)]
 regulators = gene_names.copy()
 
 gold_edges = pd.read_csv(
-    "/home/mourinho/Desktop/probability models/project/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_goldstandard.tsv",
-    '\t', header=None)
+    "DREAM4/insilico_size10/insilico_size10_1_goldstandard.tsv",
+    sep = '\t', header=None)
 
 xgb_kwargs = dict(n_estimators=398, learning_rate=0.0137089260215423, importance_type="weight", max_depth=5, n_j123obs=-1,
                   objective='reg:squarederror')
@@ -309,7 +312,7 @@ toolbox.register("evaluate", evaluate, TS_data=TS_data, time_points=time_points,
 
 # Set GA parameters
 population_size = 30
-generations = 10
+generations = 2
 cx_probability = 0.7
 mut_probability = 0.3
 
@@ -371,7 +374,6 @@ best_individual = hof[0]
 print(f"Best individual: {best_individual}")
 print(f"Fitness: {best_individual.fitness.values}")
 
-#Calculate partial correlation
 def calculate_partial_correlations(data_matrix):
     """
     Calculate the partial correlation matrix.
@@ -393,21 +395,8 @@ def calculate_partial_correlations(data_matrix):
     return partial_corr_matrix
 
 
-import networkx as nx
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import numpy as np
-from scipy.spatial.distance import pdist, squareform
-
-def adjust_node_positions(pos, min_distance=0.2, max_iterations=100):
-    """
-    Adjusts node positions to avoid overlaps using a simple repulsion mechanism.
+def adjust_node_positions(pos, min_distance=3, max_iterations=100):
     
-    :param pos: Dictionary of node positions
-    :param min_distance: Minimum allowable distance between nodes
-    :param max_iterations: Maximum number of adjustments
-    :return: Adjusted node positions
-    """
     nodes = list(pos.keys())
     positions = np.array([pos[n] for n in nodes])
     
@@ -432,92 +421,108 @@ def adjust_node_positions(pos, min_distance=0.2, max_iterations=100):
 
     return {nodes[i]: tuple(positions[i]) for i in range(len(nodes))}
 
-def plot_network_with_autocorrelation(correlation_matrix, gene_names, threshold=0.3):
-    """
-    Visualizes the gene regulatory network (GRN) with non-overlapping nodes and edges.
-    """
-    G = nx.DiGraph()
-    
-    # Add nodes
-    G.add_nodes_from(gene_names)
-    
-    # Add edges based on correlation matrix
-    num_genes = len(gene_names)
-    for i in range(num_genes):
-        for j in range(num_genes):
-            if i != j:  
-                corr = correlation_matrix[i, j]
-                if abs(corr) >= threshold:
-                    G.add_edge(gene_names[i], gene_names[j], weight=corr)
-
-    G.remove_nodes_from(list(nx.isolates(G)))  # Remove nodes with no edges
-    
-    if len(G.nodes) == 0:
-        print("No significant connections found above the threshold.")
-        return
-    
-    # Compute initial positions with high repulsion
-    pos = nx.spring_layout(G, k=0.4, iterations=50)  # Larger k increases spacing
-    pos = adjust_node_positions(pos, min_distance=0.2)  # Ensure no overlaps
-
-    # Draw nodes
-    plt.figure(figsize=(12, 12))
-    nx.draw_networkx_nodes(G, pos, node_size=1000, node_color='skyblue')
-    nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold')
-
-    ax = plt.gca()
-    node_radius = 0.05  
-    base_width = 1.5  
-    scale_factor = 2.5  
-
-    edge_offsets = {}  
-
-    for u, v, d in G.edges(data=True):
-        x1, y1 = pos[u]
-        x2, y2 = pos[v]
-        weight = d['weight']
+def draw_custom_arrows(ax, pos, G, arrow_length = 0.12):
+    """ Custom function to draw arrows with specified styles. """
+    for u, v in G.edges():
+        # Define arrowhead based on correlation sign
+        corr = G[u][v].get('weight', 0)  # Use the weight as the correlation value if set
         
-        direction = np.array([x2 - x1, y2 - y1])
-        norm = np.linalg.norm(direction)
-        if norm == 0:
-            continue 
-        
-        unit_direction = direction / norm
-        start = np.array([x1, y1]) + unit_direction * node_radius
-        end = np.array([x2, y2]) - unit_direction * node_radius
-
-        edge_key = tuple(sorted([u, v]))  
-        if edge_key in edge_offsets:
-            offset = edge_offsets[edge_key]
+        # Define arrowhead based on correlation sign
+        if corr > 0:
+            arrowhead = "-|>"  # Positive correlation (right arrowhead)
+            color = "black"    # Black for positive correlation
         else:
-            offset = np.random.uniform(-0.03, 0.03)  
-            edge_offsets[edge_key] = offset
+            arrowhead = "-["   # Negative correlation (left arrowhead)
+            color = "red" 
 
-        perp_direction = np.array([-unit_direction[1], unit_direction[0]]) * offset
-        start += perp_direction
-        end += perp_direction
+        # Get the start and end positions
+        start_pos = np.array(pos[u])
+        end_pos = np.array(pos[v])
 
-        linewidth = base_width + scale_factor * abs(weight)
+        # Calculate direction vector from start to end node
+        direction = end_pos - start_pos
+        distance = np.linalg.norm(direction)
         
-        if weight > 0:
-            arrowstyle = "-|>"  
-            color = "black"
-        else:
-            arrowstyle = "-["  
-            color = "red"
+        # Normalize the direction and shorten the arrow slightly (to avoid overlap with the node)
+        direction /= distance  # Normalize to unit vector
+        shortened_end_pos = end_pos - direction * arrow_length
 
-        arrow = mpatches.FancyArrowPatch(
-            start, end,
-            arrowstyle=arrowstyle,
-            mutation_scale=15,
-            color=color,
-            lw=linewidth,
-            connectionstyle="arc3,rad=0.2"  
+        # Create the arrow with specified style and color
+        arrow = FancyArrowPatch(
+            posA=start_pos, posB=shortened_end_pos,
+            arrowstyle=arrowhead, color=color,
+            mutation_scale=15, lw=2,
+            connectionstyle="arc3,rad=0.1"  # Slight curve for better visibility
         )
         ax.add_patch(arrow)
 
-    plt.title(f"Gene Regulatory Network (Threshold ≥ {threshold})")
+def draw_network_with_attribution_inhibition(correlation_matrix, gene_names, threshold=0.25):
+
+    # Create a directed graph
+    G = nx.DiGraph()  # Use directed graph for arrows
+    filtered_edges = predicted_edges[predicted_edges['Importance'] >= threshold]
+
+    # Add nodes to the graph (even for genes with no correlation)
+    G.add_nodes_from(gene_names)
+
+    G.remove_nodes_from(list(nx.isolates(G)))  # Remove nodes with no edges
+
+    # Add edges based on partial correlation threshold
+    for i in range(len(filtered_edges)):
+        gene1 = filtered_edges.iloc[i]['Gene1']
+        gene2 = filtered_edges.iloc[i]['Gene2']
+        importance = filtered_edges.iloc[i]['Importance']
+
+        corr = correlation_matrix[gene_names.index(gene1), gene_names.index(gene2)]
+        #sign = "-|-" if corr > 0 else "----|"  # Attribution (+) or Inhibition (-)
+
+        # Add edge with weight
+        if corr > 0:
+            G.add_edge(gene1, gene2, weight=corr)  # Positive correlation -> gene1 -> gene2
+        elif corr < 0:
+            G.add_edge(gene2, gene1, weight=corr)  # Negative correlation -> gene2 -> gene1
+
+    '''edge_colors = ['black' if G[u][v]['sign'] == "-|-" else 'red' for u, v in
+                   G.edges()]  # Green for attribution (+), red for inhibition (-)
+    edge_widths = [G[u][v]['weight'] * 3 for u, v in G.edges()]  # Scale edge widths based on correlation strength'''
+
+    # Use spring layout for optimal spacing
+    #pos = nx.spring_layout(G, k=1, iterations=100, seed=4)  # k controls node repulsion, adjust for better spacing
+    pos = nx.circular_layout(G)
+
+    #pos = adjust_node_positions(pos)
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    
+    # Draw nodes
+    nx.draw_networkx_nodes(G, pos, node_color='lightblue', edgecolors='black', linewidths=1.5, node_size=2000, ax=ax)
+
+    # Draw node labels
+    nx.draw_networkx_labels(G, pos, font_size=12, font_weight="bold", ax=ax)
+
+    # Custom arrow drawing
+    draw_custom_arrows(ax, pos, G)
+
+    # Add legend
+    plt.scatter([], [], color='black', label="Attribution (+)")
+    plt.scatter([], [], color='red', label="Inhibition (-)")
+    plt.legend(loc="upper right")
+    
+    plt.title(f"Gene Network (Threshold: {threshold})")
     plt.show()
+
+# Assuming `time_series_data` is shaped as (time_steps, genes, samples)
+def process_time_series(time_series_data, gene_names, threshold=0.2):
+    num_time_steps = len(time_series_data)  # Get number of time steps
+    
+    for t, data_matrix in enumerate(time_series_data):
+        print(f"Processing time step {t+1}/{num_time_steps}")
+        
+        # Compute partial correlations
+        partial_corr_matrix = calculate_partial_correlations(data_matrix)
+        
+        # Plot the network
+        draw_network_with_attribution_inhibition(partial_corr_matrix, gene_names, threshold)
 
 
 # After the GA loop and identifying the best individual:
@@ -535,5 +540,16 @@ VIM_best = get_importances(TS_data, time_points, time_lag=0, gene_names=gene_nam
 # Get predicted edges (GRN) from the best individual
 predicted_edges_best = get_links(VIM_best, gene_names, regulators, sort=True, file_name=None)
 
-# Plot the network for the best individual
-plot_network_with_autocorrelation(predicted_edges_best, gene_names)
+expression_data = np.vstack(TS_data)
+
+# Calculate the partial correlations
+partial_corr_matrix = calculate_partial_correlations(expression_data)
+
+# Print the full partial correlation matrix
+print("Partial Correlation Matrix:")
+print(partial_corr_matrix)
+
+# Draw the network graph
+draw_network_with_attribution_inhibition(partial_corr_matrix, gene_names, threshold=0.2) 
+
+process_time_series(TS_data, gene_names)
