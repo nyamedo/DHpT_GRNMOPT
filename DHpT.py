@@ -11,14 +11,12 @@ import matplotlib.patches as mpatches
 from scipy.spatial.distance import pdist, squareform
 from matplotlib.patches import FancyArrowPatch
 
-# from case_size10_net1 import get_importances, get_scores, TS_data, time_points, gene_names, regulators, SS_data, \
-#     gold_edges
-
-
+# Creates and returns a data frame of predicted edges when given importance scores, gene_names, and regulators
 def get_links(VIM, gene_names, regulators, sort=True, file_name=None):
+    #Identify indices of genes that are regulators
     idx = [i for i, gene in enumerate(gene_names) if gene in regulators]
 
-    # Create a list of predicted edges
+    # Create a list of predicted edges where regulator genes influence other genes
     pred_edges = [(gene_names[j], gene_names[i], score)
                   for (i, j), score in np.ndenumerate(VIM) if i != j and j in idx]
 
@@ -36,65 +34,82 @@ def get_links(VIM, gene_names, regulators, sort=True, file_name=None):
         pred_edges.to_csv(file_name, sep='\t', header=None, index=None)
         return None  # Avoid returning a DataFrame if saving to a file
 
-
+# Computes importance scores for each gene using time-series and steady-state data.
+# Returns an n by n matrix of importance scores
 def get_importances(TS_data, time_points, time_lag, gene_names, regulators, alpha, SS_data=None, param={}):
-    time_start = time.time()
+    # times the function execution
+    time_start = time.time() 
 
+    # number of genes in teh data set
     ngenes = TS_data[0].shape[1]
 
+    # Creates a list of regularization parameters for each gene
     alphas = [alpha] * ngenes
 
     # Get the indices of the candidate regulators
     idx = [i for i, gene in enumerate(gene_names) if gene in regulators]
 
-    # Learn an ensemble of trees for each target gene, and compute scores for candidate regulators
+    # Initializes the importance score matrix to all zeroes
     VIM = np.zeros((ngenes, ngenes))
-
+    
+    # Compute each gene's importance score by iterating through each gene
     for i in range(ngenes):
-        input_idx = idx.copy()
+        input_idx = idx.copy() # makes a copy of the regulator indices
         if i in input_idx:
-            input_idx.remove(i)
+            input_idx.remove(i) # prevents self-regulation
+        # Computes the importance score for each gene
         vi = get_importances_single(TS_data, time_points, time_lag, alphas[i], input_idx, i, SS_data, param)
-        VIM[i, :] = vi
+        VIM[i, :] = vi # Add the importance score to the matrix
 
+    # End timing of function
     time_end = time.time()
     print("Elapsed time: %.2f seconds" % (time_end - time_start))
 
+    # return the computed importance matrix
     return VIM
 
-
+# Computes the importance of each regulatory gene on a target gene using XGBoost regression.
+# Returns vi, an importance score for each regulator gene
 def get_importances_single(TS_data, time_points, time_lag, alpha, input_idx, output_idx, SS_data, param):
     h = 1  # lag (in number of time points) used for the finite approximation of the derivative of the target gene expression
-    ngenes = TS_data[0].shape[1]
-    nexp = len(TS_data)
-    nsamples_time = sum([expr_data.shape[0] for expr_data in TS_data])
-    ninputs = len(input_idx)
-    # Construct learning sample
-    # Time-series data
+    ngenes = TS_data[0].shape[1] # Number of genes in dataset
+    nexp = len(TS_data) # Number of experiments to run
+    nsamples_time = sum([expr_data.shape[0] for expr_data in TS_data]) # Total number of time points across all experiments
+    ninputs = len(input_idx) # Number of candidate regulators
+
+    # initialize all the training data matrices
     input_matrix_time = np.zeros((nsamples_time - h * nexp, ninputs))
     output_vect_time = np.zeros(nsamples_time - h * nexp)
-    nsamples_count = 0
+    
+    nsamples_count = 0 # Tracks number of samples
+
+    # Loops through each time-series experiment to construct training samples
     for (i, current_timeseries) in enumerate(TS_data):
-        current_time_points = time_points[i]
-        npoints = current_timeseries.shape[0]
-        time_diff_current = current_time_points[h:] - current_time_points[:npoints - h]
+        current_time_points = time_points[i] # Time points for current experiment
+        npoints = current_timeseries.shape[0] # Number of time points in the current experiment
+        # Computes the time difference between successive poitns
+        time_diff_current = current_time_points[h:] - current_time_points[:npoints - h] 
+        # Extracts expression values for candidate regulators
         current_timeseries_input = current_timeseries[:npoints - h, input_idx]
+        # Computes the approximate derivative of the targe gene's expression
         current_timeseries_output = (current_timeseries[h:, output_idx] - current_timeseries[:npoints - h,
                                                                           output_idx]) / time_diff_current + alpha * current_timeseries[
                                                                                                                      :npoints - h,
                                                                                                                      output_idx]
 
-        # Time delay
+        # Time delay adjustment
         npoints = current_timeseries_input.shape[0]
         current_timeseries_input = current_timeseries_input[:npoints - time_lag]
         current_timeseries_output = current_timeseries_output[time_lag:]
 
+        # Stores processed input and output data
         nsamples_current = current_timeseries_input.shape[0]
         input_matrix_time[nsamples_count:nsamples_count + nsamples_current, :] = current_timeseries_input
         output_vect_time[nsamples_count:nsamples_count + nsamples_current] = current_timeseries_output
         nsamples_count += nsamples_current
 
     # Steady-state data
+    # If available, combine it with the time-series data
     if SS_data is not None:
         input_matrix_steady = SS_data[:, input_idx]
         output_vect_steady = SS_data[:, output_idx] * alpha
@@ -106,21 +121,23 @@ def get_importances_single(TS_data, time_points, time_lag, alpha, input_idx, out
         input_all = input_matrix_time
         output_all = output_vect_time
 
+    # Train an XGBoost regressor on the extracted features
     treeEstimator = XGBRegressor(**param)
-
-    # Learn ensemble of trees
+    # Learn ensemble of trees and fits regressor
     treeEstimator.fit(input_all, output_all)
 
     # Compute importance scores
     feature_importances = treeEstimator.feature_importances_
     vi = np.zeros(ngenes)
-    vi[input_idx] = feature_importances
+    vi[input_idx] = feature_importances # Assigns importance scores to the corresponding gene
 
-    return vi
+    return vi # Return importance scores
 
-
+# Calculates the AUROC and AUPR scores based on predicted and actual gene regulatory edges
 def get_scores(VIM, gold_edges, gene_names, regulators):
+    # Identify indices that are regulator genes
     idx = [i for i, gene in enumerate(gene_names) if gene in regulators]
+    # Get predicted edges and scores and convert to a 
     pred_edges = [(gene_names[j], gene_names[i], score) for (i, j), score in np.ndenumerate(VIM) if i != j and j in idx]
     pred_edges = pd.DataFrame(pred_edges)
     # pred_edges = pred_edges.iloc[:100000]
