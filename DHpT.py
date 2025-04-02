@@ -137,16 +137,17 @@ def get_importances_single(TS_data, time_points, time_lag, alpha, input_idx, out
 def get_scores(VIM, gold_edges, gene_names, regulators):
     # Identify indices that are regulator genes
     idx = [i for i, gene in enumerate(gene_names) if gene in regulators]
-    # Get predicted edges and scores and convert to a 
+    # Get predicted edges and scores and convert to a data frame
     pred_edges = [(gene_names[j], gene_names[i], score) for (i, j), score in np.ndenumerate(VIM) if i != j and j in idx]
     pred_edges = pd.DataFrame(pred_edges)
-    # pred_edges = pred_edges.iloc[:100000]
+    # Merge predicted edges with ground proof edges to evaluate performance
     final = pd.merge(pred_edges, gold_edges, on=[0, 1], how='inner')
+    # Get auroc and aupr scores then return them
     auroc = roc_auc_score(final['2_y'], final['2_x'])
     aupr = average_precision_score(final['2_y'], final['2_x'])
     return auroc, aupr
 
-
+# Load in time series and steady state data
 TS_data = pd.read_csv(
     "DREAM4/insilico_size10/insilico_size10_1_timeseries.tsv",
     sep='\t').values
@@ -159,13 +160,10 @@ SS_data_2 = pd.read_csv(
 
 # SS_data_3 = pd.read_csv("/Users/macbookpro/Documents/GRNMOPT/DREAM4/insilico_size10/insilico_size10_1_multifactorial.tsv",sep='\t').values
 
-
-# get the steady-state data
-SS_data = np.vstack([SS_data_1, SS_data_2])
-
 # get the steady-state data
 SS_data = np.vstack([SS_data_1])
 
+# Define time indices for splitting time series data
 i = np.arange(0, 85, 21)
 j = np.arange(21, 106, 21)
 
@@ -174,19 +172,24 @@ TS_data = [TS_data[i:j] for (i, j) in zip(i, j)]
 # get time points
 time_points = [np.arange(0, 1001, 50)] * 5
 
+# Get the gene names and ground truth regulators
 ngenes = TS_data[0].shape[1]
 gene_names = ['G' + str(i + 1) for i in range(ngenes)]
 regulators = gene_names.copy()
 
+# Read in the gold standard edges
 gold_edges = pd.read_csv(
     "DREAM4/insilico_size10/insilico_size10_1_goldstandard.tsv",
     sep = '\t', header=None)
 
+# Define hyperparameters for XGBoost algorithms
 xgb_kwargs = dict(n_estimators=398, learning_rate=0.0137089260215423, importance_type="weight", max_depth=5, n_j123obs=-1,
                   objective='reg:squarederror')
 
+# Compute the regulatory importance matrix
 VIM = get_importances(TS_data, time_points, time_lag=0, gene_names=gene_names, regulators=regulators,
                       alpha=0.022408670532763, SS_data=SS_data, param=xgb_kwargs)
+# Evaluate network by getting auroc and aupr scores
 auroc, aupr = get_scores(VIM, gold_edges, gene_names, regulators)
 # print(auroc, aupr)
 
@@ -214,7 +217,7 @@ predicted_edges = get_links(VIM, gene_names, regulators, sort=True, file_name=No
 #
 #     return VIM
 
-def get_importances_single(TS_data, time_points, time_lag, alpha, input_idx, output_idx, SS_data, param):
+'''def get_importances_single(TS_data, time_points, time_lag, alpha, input_idx, output_idx, SS_data, param):
     h = 1
     ngenes = TS_data[0].shape[1]
     nsamples_time = sum([expr_data.shape[0] for expr_data in TS_data])
@@ -268,7 +271,8 @@ def get_importances_single(TS_data, time_points, time_lag, alpha, input_idx, out
 #     final = pd.merge(pred_edges, gold_edges, on=[0, 1], how='inner')
 #     auroc = roc_auc_score(final['2_y'], final['2_x'])
 #     aupr = average_precision_score(final['2_y'], final['2_x'])
-#     return auroc, aupr
+#     return auroc, aupr'''
+
 
 def evaluate(individual, TS_data, time_points, time_lag, gene_names, regulators, SS_data, gold_edges):
     """
@@ -299,10 +303,11 @@ def evaluate(individual, TS_data, time_points, time_lag, gene_names, regulators,
     return auroc, aupr
 
 
-# Genetic algorithm setup with elitism
+# Define the fitness function as a multi-objective optimization problem
 creator.create("FitnessMax", base.Fitness, weights=(1.0, 1.0))  # Maximize both AUROC and AUPR
-creator.create("Individual", list, fitness=creator.FitnessMax)
+creator.create("Individual", list, fitness=creator.FitnessMax) # Each individual represents a set of hyperparameters
 
+# Initialize a DEAP toolbox to define genetic operators
 toolbox = base.Toolbox()
 
 # Define the bounds for the hyperparameters
@@ -313,10 +318,11 @@ BOUNDS_HIGH = [500, 0.1, 15]
 for i in range(3):  # We have 3 hyperparameters
     toolbox.register(f"hyperparameter_{i}", random.uniform, BOUNDS_LOW[i], BOUNDS_HIGH[i])
 
-# Create individuals based on the hyperparameter bounds
+# Create random individuals based on the hyperparameter bounds
 toolbox.register("individualCreator", tools.initCycle, creator.Individual,
                  tuple([toolbox.__getattribute__(f"hyperparameter_{i}") for i in range(3)]), n=1)
 
+# Create an individual with the selected hyperparameters
 toolbox.register("population", tools.initRepeat, list, toolbox.individualCreator)
 
 # Register crossover, mutation, and selection methods
@@ -324,10 +330,11 @@ toolbox.register("mate", tools.cxSimulatedBinaryBounded, low=BOUNDS_LOW, up=BOUN
 toolbox.register("mutate", tools.mutPolynomialBounded, low=BOUNDS_LOW, up=BOUNDS_HIGH, eta=1.0, indpb=1.0/3)
 toolbox.register("select", tools.selTournament, tournsize=3)
 
+# Register the evaluation function
 toolbox.register("evaluate", evaluate, TS_data=TS_data, time_points=time_points, time_lag=0, gene_names=gene_names,
                  regulators=regulators, SS_data=SS_data, gold_edges=gold_edges)
 
-# Set GA parameters
+# Set Genetic Algorithm parameters
 population_size = 30
 generations = 2
 cx_probability = 0.7
@@ -336,7 +343,7 @@ mut_probability = 0.3
 # Create an initial population
 population = toolbox.population(n=population_size)
 
-# Hall of Fame for elitism
+# Create a Hall of Fame to store the best individual found during evolution
 hof = tools.HallOfFame(1)
 
 # Define the statistics (optional)
@@ -346,43 +353,45 @@ stats.register("std", np.std)
 stats.register("min", np.min)
 stats.register("max", np.max)
 
+# Starts the genetic algorithm loop
 # Run the genetic algorithm with elitism using eaSimple
 for gen in range(generations):
     print(f"Generation {gen}")
 
-    # Evaluate all individuals in the population
+    # Evaluate fitness for all individuals in the population
     fitnesses = list(map(toolbox.evaluate, population))
     for ind, fit in zip(population, fitnesses):
-        ind.fitness.values = fit
+        ind.fitness.values = fit # Assign fitness values to individuals
 
-    # Select the best individuals for mating
+    # Select the best individuals for reproduction
     selected = toolbox.select(population, len(population))
     offspring = list(map(toolbox.clone, selected))
 
-    # Apply crossover and mutation
+    # Apply crossover 
     for child1, child2 in zip(offspring[::2], offspring[1::2]):
         if random.random() < cx_probability:
-            toolbox.mate(child1, child2)
-            del child1.fitness.values
-            del child2.fitness.values
+            toolbox.mate(child1, child2) # Perform crossover
+            del child1.fitness.values # Invalidate fitness
+            del child2.fitness.values # Invalidate fitness
 
+    # Apply mutation to offspring
     for mutant in offspring:
         if random.random() < mut_probability:
-            toolbox.mutate(mutant)
-            del mutant.fitness.values
+            toolbox.mutate(mutant) # Perform mutation
+            del mutant.fitness.values # Invalidate fitness
 
-    # Evaluate the fitness of the new offspring
+    # Recalculate fitness for offspring with invalidated fitness values
     for ind in offspring:
         if not ind.fitness.valid:
             ind.fitness.values = toolbox.evaluate(ind)
 
-    # Update the Hall of Fame
+    # Update the Hall of Fame with the best individual
     hof.update(offspring)
 
     # Replace the old population with the new one
     population[:] = offspring
 
-    # Log statistics
+    # Log statistics for the current generation
     record = stats.compile(population)
     print(record)
 
@@ -391,68 +400,76 @@ best_individual = hof[0]
 print(f"Best individual: {best_individual}")
 print(f"Fitness: {best_individual.fitness.values}")
 
-def calculate_partial_correlations(data_matrix):
-    """
-    Calculate the partial correlation matrix.
 
-    :param data_matrix: 2D numpy array where rows are samples and columns are variables
-    :return: Partial correlation matrix
-    """
-    # Calculate the inverse of the covariance matrix
+# Calculate the partial correlation matrix, which measures the direct relationships 
+# between variables while controlling for the influence of other variables.
+def calculate_partial_correlations(data_matrix):
+    
+    # Calculate the covariance matrix
     covariance_matrix = np.cov(data_matrix, rowvar=False)
+    # take the inverse of the covariance matrix to compute the precision matrix
     precision_matrix = np.linalg.inv(covariance_matrix)
 
-    # Compute the partial correlation matrix
+    # Get diagonal elements for normalization
     d = np.sqrt(np.diag(precision_matrix))
+    # Compute partial correlation matrix using normalization
     partial_corr_matrix = -precision_matrix / np.outer(d, d)
 
-    # Set the diagonal elements to 1
+    # Set the diagonal elements to 1 since self-correlation is always 1
     np.fill_diagonal(partial_corr_matrix, 1)
 
     return partial_corr_matrix
 
-
+# Adjust node positions in a graph to ensure a minimum distance between them, preventing overlap.
 def adjust_node_positions(pos, min_distance=3, max_iterations=100):
-    
+    # Get node labels
     nodes = list(pos.keys())
-    positions = np.array([pos[n] for n in nodes])
+    positions = np.array([pos[n] for n in nodes]) # Convert positions to numpy array
     
     for _ in range(max_iterations):
-        distances = squareform(pdist(positions))  # Compute pairwise distances
-        np.fill_diagonal(distances, np.inf)  # Ignore self-distances
-        
+        # Compute pairwise distances between all nodes, ignoring self-distances
+        distances = squareform(pdist(positions))  
+        np.fill_diagonal(distances, np.inf)  
+
+        # Identify pairs of nodes that are too close to each other
         overlap_indices = np.where(distances < min_distance)
         if len(overlap_indices[0]) == 0:
-            break  # Exit early if no overlaps
-        
+            break  # Exit early if no overlaps are found
+
+        # Adjust position of overlapping nodes
         for i, j in zip(*overlap_indices):
-            if i < j:  # Avoid double adjustments
-                vec = positions[j] - positions[i]
-                norm = np.linalg.norm(vec)
+            if i < j:  # Avoid adjusting the same pair twice
+                vec = positions[j] - positions[i] # Compute direction vector
+                norm = np.linalg.norm(vec) # Computer distance
+
+                # If nodes are in the same place, apply a small random shift
                 if norm == 0:
                     vec = np.random.rand(2) - 0.5  # Random small shift if nodes are exactly on top
                     norm = np.linalg.norm(vec)
+                # Move nodes apart to maintain the minimum distance
                 displacement = (min_distance - norm) * (vec / norm) * 0.5
                 positions[i] -= displacement
                 positions[j] += displacement
-
+                
+    # Convert back to dict and return nodes
     return {nodes[i]: tuple(positions[i]) for i in range(len(nodes))}
 
+#Draws directional arrows on a graph, distinguishing between positive and negative correlations.
 def draw_custom_arrows(ax, pos, G, arrow_length = 0.12):
-    """ Custom function to draw arrows with specified styles. """
+
     for u, v in G.edges():
-        # Define arrowhead based on correlation sign
-        corr = G[u][v].get('weight', 0)  # Use the weight as the correlation value if set
+        # Get the weight (correlation value) of the edge, defaulting to 0 if not defined
+        corr = G[u][v].get('weight', 0) 
         
-        # Define arrowhead based on correlation sign
+        # Adjust arrowhead style and color based on correlation sign
         if corr > 0:
             arrowhead = "-|>"  # Positive correlation (right arrowhead)
             color = "black"    # Black for positive correlation
         else:
-            arrowhead = "-["   # Negative correlation (left arrowhead)
-            color = "red" 
+            arrowhead = "-["   # Negative correlation (-[ arrowhead)
+            color = "red"      # Red for negative correlation
 
-        # Get the start and end positions
+        # Get the start and end positions of the arrow
         start_pos = np.array(pos[u])
         end_pos = np.array(pos[v])
 
@@ -460,11 +477,11 @@ def draw_custom_arrows(ax, pos, G, arrow_length = 0.12):
         direction = end_pos - start_pos
         distance = np.linalg.norm(direction)
         
-        # Normalize the direction and shorten the arrow slightly (to avoid overlap with the node)
+        # Normalize the direction vector and adjust the endpoint to avoid overlap
         direction /= distance  # Normalize to unit vector
         shortened_end_pos = end_pos - direction * arrow_length
 
-        # Create the arrow with specified style and color
+        # Create and add the arrow patch to the plot
         arrow = FancyArrowPatch(
             posA=start_pos, posB=shortened_end_pos,
             arrowstyle=arrowhead, color=color,
@@ -473,42 +490,41 @@ def draw_custom_arrows(ax, pos, G, arrow_length = 0.12):
         )
         ax.add_patch(arrow)
 
+# Draws a directed gene regulatory network based on partial correlation values, distinguishing between positive and negative correlations.
 def draw_network_with_attribution_inhibition(correlation_matrix, gene_names, threshold=0.25):
 
     # Create a directed graph
-    G = nx.DiGraph()  # Use directed graph for arrows
-    filtered_edges = predicted_edges[predicted_edges['Importance'] >= threshold]
+    G = nx.DiGraph()  # Use a directed graph to represent gene regulation
+    filtered_edges = predicted_edges[predicted_edges['Importance'] >= threshold] # Filter edges by threshold
 
-    # Add nodes to the graph (even for genes with no correlation)
+    # Add nodes to the graph (even for genes that might not have connections)
     G.add_nodes_from(gene_names)
 
-    G.remove_nodes_from(list(nx.isolates(G)))  # Remove nodes with no edges
+    # Remove isolated nodes (genes with no edges)
+    G.remove_nodes_from(list(nx.isolates(G)))  
 
     # Add edges based on partial correlation threshold
     for i in range(len(filtered_edges)):
-        gene1 = filtered_edges.iloc[i]['Gene1']
-        gene2 = filtered_edges.iloc[i]['Gene2']
-        importance = filtered_edges.iloc[i]['Importance']
+        gene1 = filtered_edges.iloc[i]['Gene1'] # Source gene
+        gene2 = filtered_edges.iloc[i]['Gene2'] # Target gene
+        importance = filtered_edges.iloc[i]['Importance'] # Importance score (weight)
 
+        # Retrieve correlation value from the correlation matrix
         corr = correlation_matrix[gene_names.index(gene1), gene_names.index(gene2)]
-        #sign = "-|-" if corr > 0 else "----|"  # Attribution (+) or Inhibition (-)
 
-        # Add edge with weight
+        # Add directed edge: positive correlation -> gene1 regulates gene2
         if corr > 0:
-            G.add_edge(gene1, gene2, weight=corr)  # Positive correlation -> gene1 -> gene2
+            G.add_edge(gene1, gene2, weight=corr)  
         elif corr < 0:
-            G.add_edge(gene2, gene1, weight=corr)  # Negative correlation -> gene2 -> gene1
+            G.add_edge(gene2, gene1, weight=corr)  # Reverse direction for inhibition (negative correlation)
 
-    '''edge_colors = ['black' if G[u][v]['sign'] == "-|-" else 'red' for u, v in
-                   G.edges()]  # Green for attribution (+), red for inhibition (-)
-    edge_widths = [G[u][v]['weight'] * 3 for u, v in G.edges()]  # Scale edge widths based on correlation strength'''
-
-    # Use spring layout for optimal spacing
-    #pos = nx.spring_layout(G, k=1, iterations=100, seed=4)  # k controls node repulsion, adjust for better spacing
+    # Circular layout for better visualization
     pos = nx.circular_layout(G)
 
-    #pos = adjust_node_positions(pos)
+    # Adjust node positions to prevent overlap
+    pos = adjust_node_positions(pos)
 
+    # Create a figure and axis for visualization
     fig, ax = plt.subplots(figsize=(8, 8))
     
     # Draw nodes
@@ -520,7 +536,7 @@ def draw_network_with_attribution_inhibition(correlation_matrix, gene_names, thr
     # Custom arrow drawing
     draw_custom_arrows(ax, pos, G)
 
-    # Add legend
+    # Add a legend to indicate positive (attribution) and negative (inhibition) relationships
     plt.scatter([], [], color='black', label="Attribution (+)")
     plt.scatter([], [], color='red', label="Inhibition (-)")
     plt.legend(loc="upper right")
@@ -528,21 +544,21 @@ def draw_network_with_attribution_inhibition(correlation_matrix, gene_names, thr
     plt.title(f"Gene Network (Threshold: {threshold})")
     plt.show()
 
-# Assuming `time_series_data` is shaped as (time_steps, genes, samples)
+#Processes time-series gene expression data, computes partial correlations, and visualizes the network at each time step.
 def process_time_series(time_series_data, gene_names, threshold=0.2):
     num_time_steps = len(time_series_data)  # Get number of time steps
     
     for t, data_matrix in enumerate(time_series_data):
         print(f"Processing time step {t+1}/{num_time_steps}")
         
-        # Compute partial correlations
+        # Compute partial correlation matrix for the current time step
         partial_corr_matrix = calculate_partial_correlations(data_matrix)
         
-        # Plot the network
+        # Visualize the gene network at this time step
         draw_network_with_attribution_inhibition(partial_corr_matrix, gene_names, threshold)
 
 
-# After the GA loop and identifying the best individual:
+# After the genetic algorithm (GA) loop, retrieve the best individual solution
 best_individual = hof[0]
 # print(f"Best individual: {best_individual}")
 # print(f"Fitness: {best_individual.fitness.values}")
